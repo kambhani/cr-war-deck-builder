@@ -1,5 +1,7 @@
 # Package Imports
-import datetime
+import calendar
+
+from alive_progress import alive_bar
 import lxml.html
 import lxml.cssselect
 import requests
@@ -21,6 +23,7 @@ def create_table(conn: sqlite3.Connection, create_table: str):
     if conn is not None:
         c = conn.cursor()
         c.execute(create_table)
+        conn.commit()
 
 
 # Fill in the cards database with the cards from the game
@@ -46,27 +49,53 @@ def populate_cards(conn: sqlite3.Connection):
         print("Could not update card list...")
 
 
+# Create and update the levels table if necessary
+# Columns use underscores instead of dashes due to SQL column naming rules
+def update_levels_table(conn: sqlite3.Connection):
+    sql_create_levels_table = "CREATE TABLE IF NOT EXISTS levels (\n\tid text PRIMARY KEY,\n\t"
+    c = conn.cursor()
+    for row in c.execute("SELECT * FROM cards"):
+        sql_create_levels_table += row[0].replace("-", "_") + " integer,\n\t"
+    sql_create_levels_table = sql_create_levels_table[:-3]
+    sql_create_levels_table += "\n);"
+    create_table(conn, sql_create_levels_table)
+    columns = [(row[1]) for row in c.execute("PRAGMA table_info(levels)").fetchall()]
+    for row in c.execute("SELECT * FROM cards"):
+        if row[0].replace("-", "_") not in columns:
+            c.execute("ALTER TABLE levels ADD COLUMN %s integer" % row[0].replace("-", "_"))
+    conn.commit()
+
+
 # Load the player's levels in for better war deck advice
-def load_levels(cr_api_token: str, tag: str):
+def load_levels(conn: sqlite3.Connection, cr_api_token: str, tag: str):
     if len(tag) == 0:
         print("Player tag cannot be empty!")
-        return;
+        return
 
     if tag[0] == "#":
         tag = tag[1:]
+    tag = tag.upper()
 
     url = "https://proxy.royaleapi.dev/v1/players/%23" + tag
     player_info = requests.get(url, headers={"Authorization": "Bearer " + cr_api_token}).json()
+    tag = "#" + tag
 
     if "reason" in player_info:
         print("Could not load player info")
     else:
+        c = conn.cursor()
+        c.execute("INSERT OR REPLACE INTO levels(id) VALUES(?)", (tag,))
+        for card in player_info["cards"]:
+            card_name = card["name"].lower().replace(" ", "_").replace(".", "").replace("-", "_")
+            if c.execute("SELECT EXISTS(SELECT 1 FROM cards WHERE id='%s')" % card_name.replace("_", "-")).fetchone()[0] == 0:
+                print("Found unknown card %s. Please report to developer." % card_name)
+            c.execute("UPDATE levels SET %s=? WHERE id=?" % card_name, (14 - card["maxLevel"] + card["level"], tag))
         print("Levels for player " + player_info["name"] + " successfully loaded")
-        return player_info["cards"]
+        conn.commit()
 
 
 # Loads a single RoyaleAPI webpage into the database by scraping
-def load_deck(conn: sqlite3.Connection, url:str):
+def load_deck(conn: sqlite3.Connection, url: str):
     sql = """
         INSERT OR REPLACE INTO decks(id, card_1, card_2, card_3, card_4, card_5, card_6,
             card_7, card_8, rating, use_rate, win_rate)
@@ -78,6 +107,7 @@ def load_deck(conn: sqlite3.Connection, url:str):
         session = requests.Session()
         response = session.get(url, headers={"user-agent": "Mozilla/5.0"})
         html = lxml.html.fromstring(response.text)
+
         for element in html.cssselect(".ui.two.column.stackable.padded.grid"):
             links = list(element.iterlinks())
             deck_id = links[0][2][13:]
@@ -88,10 +118,11 @@ def load_deck(conn: sqlite3.Connection, url:str):
             win_rate = float(stats[2].strip()[:-1])
             try:
                 c.execute(sql, (deck_id, cards[0], cards[1], cards[2], cards[3], cards[4], cards[5], cards[6],
-                          cards[7], rating, use_rate, win_rate))
+                                cards[7], rating, use_rate, win_rate))
             except Exception as e:
                 pass
-            conn.commit()
+
+        conn.commit()
     except Exception as e:
         print(e)
         print("Could not load decks...")
@@ -100,7 +131,6 @@ def load_deck(conn: sqlite3.Connection, url:str):
 
 # Loads more decks into the database
 def load_decks(conn: sqlite3.Connection):
-    print("For consistency purposes, this program only pulls data from Grand Challenges in the last seven days")
     option = -1
     repeat = False
     while option != "1" and option != "2" and option != "3" and option != "4":
@@ -115,20 +145,37 @@ def load_decks(conn: sqlite3.Connection):
         option = input().strip()
         repeat = True
 
-    match option:
-        case "1":
-            print("Case 1")
-            load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=10")
-        case "2":
-            print("Case 2")
-        case "3":
-            print("Case 3")
-        case "4":
-            print("Case 4")
-            return
-        case _:
-            print("Unknown error, returning to main screen")
-            return
+    try:
+        match option:
+            case "1":
+                load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20")
+                print("Decks successfully loaded!\n")
+                load_decks(conn)
+            case "2":
+                card = input("Enter the card you would like to include: ").lower().replace(" ", "-")
+                c = conn.cursor()
+                if c.execute("SELECT 1 FROM cards WHERE id='" + card + "'").fetchone():
+                    load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + card)
+                    print("Decks successfully loaded!\n")
+                    load_decks(conn)
+                else:
+                    print("Invalid card, please try again...\n")
+                    load_decks(conn)
+            case "3":
+                c = conn.cursor()
+                num_cards = len(c.execute("SELECT * FROM cards").fetchall())
+                with alive_bar(num_cards, force_tty=True) as bar:
+                    for row in c.execute("SELECT * FROM cards"):
+                        load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
+                        bar()
+            case "4":
+                print("Returning to main screen...\n")
+                return
+            case _:
+                print("Unknown error, returning to main screen...\n")
+                return
+    except Exception as e:
+        print("An unknown error occurred. Returning to the main screen...")
 
 
 # The driver code for the program
@@ -184,6 +231,9 @@ def main():
     # Create the decks table if it doesn't already exist
     create_table(conn, sql_create_decks_table)
 
+    # Create and update the levels table if necessary
+    update_levels_table(conn)
+
     # Print the disclaimer
     print("This content is not affiliated with, endorsed, sponsored, or specifically approved by Supercell and "
           "Supercell is not responsible for it.\nFor more information see Supercell’s Fan Content "
@@ -203,19 +253,21 @@ def main():
         match option:
             case "1":
                 tag = input("Please input your player tag: ")
-                levels = load_levels(cr_api_token, tag)
-                print(levels)
+                load_levels(conn, cr_api_token, tag)
             case "2":
                 load_decks(conn)
             case "3":
                 print("Option 3 was selected")
             case "4":
-                print("Option 4 was selected")
+                print("Exiting program...")
+                conn.close()
+                quit()
             case _:
                 print("Unknown error, terminating program...")
                 conn.close()
                 quit()
 
+    # Final close for safety purposes
     conn.close()
 
 
