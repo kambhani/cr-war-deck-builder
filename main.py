@@ -1,7 +1,7 @@
 # Package Imports
 
 from alive_progress import alive_bar, alive_it
-import config
+import config  # Contains cr_api_token, the private API token
 from datetime import datetime, timezone
 from functools import cmp_to_key
 from heapq import nlargest
