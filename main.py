@@ -1,7 +1,9 @@
 # Package Imports
-import calendar
 
-from alive_progress import alive_bar
+from alive_progress import alive_bar, alive_it
+from datetime import datetime, timezone
+from functools import cmp_to_key
+from heapq import nlargest
 import lxml.html
 import lxml.cssselect
 import requests
@@ -87,7 +89,8 @@ def load_levels(conn: sqlite3.Connection, cr_api_token: str, tag: str):
         c.execute("INSERT OR REPLACE INTO levels(id) VALUES(?)", (tag,))
         for card in player_info["cards"]:
             card_name = card["name"].lower().replace(" ", "_").replace(".", "").replace("-", "_")
-            if c.execute("SELECT EXISTS(SELECT 1 FROM cards WHERE id='%s')" % card_name.replace("_", "-")).fetchone()[0] == 0:
+            if c.execute("SELECT EXISTS(SELECT 1 FROM cards WHERE id='%s')" % card_name.replace("_", "-")).fetchone()[
+                0] == 0:
                 print("Found unknown card %s. Please report to developer." % card_name)
             c.execute("UPDATE levels SET %s=? WHERE id=?" % card_name, (14 - card["maxLevel"] + card["level"], tag))
         print("Levels for player " + player_info["name"] + " successfully loaded")
@@ -98,8 +101,8 @@ def load_levels(conn: sqlite3.Connection, cr_api_token: str, tag: str):
 def load_deck(conn: sqlite3.Connection, url: str):
     sql = """
         INSERT OR REPLACE INTO decks(id, card_1, card_2, card_3, card_4, card_5, card_6,
-            card_7, card_8, rating, use_rate, win_rate)
-        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            card_7, card_8, rating, usage, win_rate, entry_date)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     try:
@@ -114,18 +117,19 @@ def load_deck(conn: sqlite3.Connection, url: str):
             cards = deck_id.split(",")
             stats = element.xpath("div/div/div/div/table/tbody/tr/*/text()")
             rating = int(stats[0].strip())
-            use_rate = float(stats[1].strip()[:-1])
+            usage = int(stats[5].strip().replace(',', ''))
             win_rate = float(stats[2].strip()[:-1])
             try:
                 c.execute(sql, (deck_id, cards[0], cards[1], cards[2], cards[3], cards[4], cards[5], cards[6],
-                                cards[7], rating, use_rate, win_rate))
+                                cards[7], rating, usage, win_rate, datetime.now(timezone.utc)))
             except Exception as e:
+                print(e)
                 pass
 
         conn.commit()
     except Exception as e:
         print(e)
-        print("Could not load decks...")
+        print("Could not load decks...\n")
         return
 
 
@@ -164,7 +168,7 @@ def load_decks(conn: sqlite3.Connection):
             case "3":
                 c = conn.cursor()
                 num_cards = len(c.execute("SELECT * FROM cards").fetchall())
-                with alive_bar(num_cards, force_tty=True) as bar:
+                with alive_bar(num_cards) as bar:
                     for row in c.execute("SELECT * FROM cards"):
                         load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
                         bar()
@@ -176,6 +180,176 @@ def load_decks(conn: sqlite3.Connection):
                 return
     except Exception as e:
         print("An unknown error occurred. Returning to the main screen...")
+
+
+# This function computes the score of a deck, or how good it is
+# Modifying how the score is computing will affect which decks get returned
+def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], prev_decks: [], max_idx: int):
+    for cur_idx in range(max_idx + 1, len(decks)):
+        deck = decks[cur_idx]
+        score = deck[10]  # Initial score is the deck's usage
+        score *= 1 - (datetime.now(timezone.utc) - datetime.strptime(deck[12], "%Y-%m-%d %H:%M:%S.%f%z")).days * 0.02
+        used_set = set(used)  # The set version of the currently used cards
+        can_add = True  # Initial value of can_add
+        for i in range(1, 9):
+            if deck[i] in used_set:
+                # If we already used a card, we can't use this deck
+                can_add = False
+            level = c.execute("SELECT " + deck[i].replace('-', '_') + " FROM levels WHERE id='" + tag + "'").fetchone()
+            if level is None:
+                # If the player doesn't have this card, we also can't use this deck
+                can_add = False
+            else:
+                score *= 1 - 0.1 * (14 - level[0])  # Lose one point for every card level below max
+        if not can_add:
+            score = -10000
+
+        new_decks = list(prev_decks)
+        new_decks.append(deck[0])
+        new_used = list(used)
+        for i in range(1, 9):
+            new_used.append(deck[i])
+        yield prev_score + score, new_used, new_decks, cur_idx
+
+
+# This function actually performs the generation
+def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: int, variation: int):
+    num_decks = 6 if pruning == 2 else decks_to_return * 7
+
+    # Get all decks from the database
+    c = conn.cursor()
+    decks = c.execute("SELECT * FROM decks").fetchall()
+
+    # Get the most optimal first decks
+    print("Getting optimal first decks...")
+    deck_1 = nlargest(num_decks, deck_score(c, decks, tag, 0, [], [], -1))
+
+    # Get the most optimal second decks
+    print("Getting optimal second decks...")
+    deck_2 = []
+    for deck in alive_it(deck_1):
+        cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+        for cur_deck in cur_decks:
+            if float(cur_deck[0]) > 0:
+                deck_2.append(cur_deck)
+    if pruning == 1:
+        deck_2 = nlargest(num_decks, deck_2)
+
+    # Get the most optimal third decks
+    print("Getting optimal third decks...")
+    deck_3 = []
+    for deck in alive_it(deck_2):
+        cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+        for cur_deck in cur_decks:
+            if float(cur_deck[0] > 0):
+                deck_3.append(cur_deck)
+    if pruning == 1:
+        deck_3 = nlargest(num_decks, deck_3)
+
+    # Get the most optimal fourth decks
+    print("Getting optimal fourth decks...")
+    deck_4 = []
+    for deck in alive_it(deck_3):
+        cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+        for cur_deck in cur_decks:
+            if float(cur_deck[0] > 0):
+                deck_4.append(cur_deck)
+    if pruning == 1:
+        deck_4 = nlargest(num_decks, deck_4)
+
+    if variation == 1:
+        deck_4 = sorted(deck_4, key=cmp_to_key(lambda deck1, deck2: float(deck2[0]) - float(deck1[0])))
+        printed = 0
+        used_cards_sets = []
+        for deck_obj in deck_4:
+            cur_card_set = set(deck_obj[1])
+            can_add = True
+            for used_card_set in used_cards_sets:
+                if len(cur_card_set.intersection(used_card_set)) > 24:
+                    can_add = False
+                    break
+            if can_add:
+                print("Deck %d with a score of %s" % (printed + 1, deck_obj[0]))
+                for deck in deck_obj[2]:
+                    print("https://royaleapi.com/decks/stats/" + deck)
+                print("--------------------------------------")
+                printed += 1
+                used_cards_sets.append(cur_card_set)
+            if printed == decks_to_return:
+                print()
+                return
+        print()
+    else:
+        deck_4 = nlargest(decks_to_return, deck_4)
+        # Print out the decks
+        for idx, decks in enumerate(deck_4):
+            if float(decks[0]) > 0:
+                print("Deck %d with a score of %s" % (idx + 1, decks[0]))
+                for deck in decks[2]:
+                    print("https://royaleapi.com/decks/stats/" + deck)
+                print("--------------------------------------")
+        print()
+
+
+# Generates optimal war decks
+def generate_war_decks(conn: sqlite3.Connection, tag: str):
+    c = conn.cursor()
+    if tag[0] != '#':
+        tag = '#' + tag
+    tag = tag.upper()
+    levels = c.execute("SELECT * FROM levels WHERE id='" + tag + "'").fetchone()
+
+    if not levels:
+        print("Player tag not loaded, returning to main screen...\n")
+        return
+
+    decks_to_return = -1
+    repeat = False
+    while not isinstance(decks_to_return, int) or decks_to_return < 0 or decks_to_return > 20:
+        if repeat:
+            print("Invalid entry, please enter again")
+        decks_to_return = input("Enter the number of decks to return (between 1 and 20 inclusive) or press q to quit: ")
+        if decks_to_return == "q":
+            print()
+            return
+        try:
+            decks_to_return = int(decks_to_return)
+        except ValueError as e:
+            pass
+        repeat = True
+    decks_to_return = int(decks_to_return)
+
+    repeat = False
+    pruning = -1
+    while pruning != "1" and pruning != "2" and pruning != "3":
+        if repeat:
+            print("Invalid entry, please enter again")
+        print("Do you want to use iterative pruning?")
+        print("(1) Yes")
+        print("(2) No")
+        print("(3) Quit")
+        pruning = input()
+        repeat = True
+    pruning = int(pruning)
+    if pruning == 3:
+        return
+
+    repeat = False
+    variation = -1
+    while variation != "1" and variation != "2" and variation != "3":
+        if repeat:
+            print("Invalid entry, please enter again")
+        print("Do you want to force variation in the returned decks (at the expense of optimality)?")
+        print("(1) Yes")
+        print("(2) No")
+        print("(3) Quit")
+        variation = input()
+        repeat = True
+    variation = int(variation)
+    if variation == 3:
+        return
+
+    generate(conn, tag, decks_to_return, pruning, variation)
 
 
 # The driver code for the program
@@ -204,8 +378,9 @@ def main():
             card_7 text NOT NULL,
             card_8 text NOT NULL,
             rating integer NOT NULL,
-            use_rate DECIMAL(4,1) NOT NULL,
+            usage integer NOT NULL,
             win_rate DECIMAL(4,1) NOT NULL,
+            entry_date DATE NOT NULL,
             FOREIGN KEY (card_1) REFERENCES cards (id),
             FOREIGN KEY (card_2) REFERENCES cards (id),
             FOREIGN KEY (card_3) REFERENCES cards (id),
@@ -257,7 +432,8 @@ def main():
             case "2":
                 load_decks(conn)
             case "3":
-                print("Option 3 was selected")
+                tag = input("Please input your player tag: ")
+                generate_war_decks(conn, tag)
             case "4":
                 print("Exiting program...")
                 conn.close()
