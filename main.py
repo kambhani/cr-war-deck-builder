@@ -1,6 +1,7 @@
 # Package Imports
 
 from alive_progress import alive_bar, alive_it
+import config
 from datetime import datetime, timezone
 from functools import cmp_to_key
 from heapq import nlargest
@@ -356,7 +357,7 @@ def generate_war_decks(conn: sqlite3.Connection, tag: str):
 def main():
     # Necessary variables
     db_file_name = "database.db"
-    cr_api_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjE1YjJlODJjLWVjOGEtNDljNy05MzViLWMwMzFhNGZmNTk1NiIsImlhdCI6MTY3NzkwMDE1Miwic3ViIjoiZGV2ZWxvcGVyLzZmMDliMjM1LWViMDUtMzhjOS04ZTEyLTMxYjViMjJkM2VkNCIsInNjb3BlcyI6WyJyb3lhbGUiXSwibGltaXRzIjpbeyJ0aWVyIjoiZGV2ZWxvcGVyL3NpbHZlciIsInR5cGUiOiJ0aHJvdHRsaW5nIn0seyJjaWRycyI6WyI0NS43OS4yMTguNzkiLCIxMjguMjExLjI1Mi4xNDAiXSwidHlwZSI6ImNsaWVudCJ9XX0.cSUEksrJZF5MZDhaFDFrnioJtx_Co3tKajRHr_4tzb3aGUP6pqbS_ktXI7c1id62yxEFRgq63odXKb-OGgc11A"
+    cr_api_token = config.cr_api_token
     sql_create_cards_table = """
         CREATE TABLE IF NOT EXISTS cards (
             id text PRIMARY KEY,
