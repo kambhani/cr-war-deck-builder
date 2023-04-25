@@ -7,6 +7,7 @@ from functools import cmp_to_key
 from heapq import nlargest
 import lxml.html
 import lxml.cssselect
+import math
 import requests
 import sqlite3
 
@@ -153,14 +154,14 @@ def load_decks(conn: sqlite3.Connection):
     try:
         match option:
             case "1":
-                load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20")
+                load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=30")
                 print("Decks successfully loaded!\n")
                 load_decks(conn)
             case "2":
                 card = input("Enter the card you would like to include: ").lower().replace(" ", "-")
                 c = conn.cursor()
                 if c.execute("SELECT 1 FROM cards WHERE id='" + card + "'").fetchone():
-                    load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + card)
+                    load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=30&inc=" + card)
                     print("Decks successfully loaded!\n")
                     load_decks(conn)
                 else:
@@ -171,7 +172,7 @@ def load_decks(conn: sqlite3.Connection):
                 num_cards = len(c.execute("SELECT * FROM cards").fetchall())
                 with alive_bar(num_cards) as bar:
                     for row in c.execute("SELECT * FROM cards"):
-                        load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
+                        load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=30&inc=" + row[0])
                         bar()
             case "4":
                 print("Returning to main screen...\n")
@@ -188,10 +189,11 @@ def load_decks(conn: sqlite3.Connection):
 def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], prev_decks: [], max_idx: int):
     for cur_idx in range(max_idx + 1, len(decks)):
         deck = decks[cur_idx]
-        score = deck[10]  # Initial score is the deck's usage
+        score = deck[10] * deck[11]  # Initial score
         score *= 1 - (datetime.now(timezone.utc) - datetime.strptime(deck[12], "%Y-%m-%d %H:%M:%S.%f%z")).days * 0.02
         used_set = set(used)  # The set version of the currently used cards
         can_add = True  # Initial value of can_add
+        levels_off_max = 0  # Number of levels off of having the war deck maxed
         for i in range(1, 9):
             if deck[i] in used_set:
                 # If we already used a card, we can't use this deck
@@ -201,9 +203,11 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
                 # If the player doesn't have this card, we also can't use this deck
                 can_add = False
             else:
-                score *= 1 - 0.1 * (14 - level[0])  # Lose one point for every card level below max
+                levels_off_max += 14 - level[0]
         if not can_add:
-            score = -10000
+            score = -100000
+        if score > 0:
+            score *= pow(math.e, -0.2 * levels_off_max)
 
         new_decks = list(prev_decks)
         new_decks.append(deck[0])
@@ -215,7 +219,7 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
 
 # This function actually performs the generation
 def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: int, variation: int):
-    num_decks = 6 if pruning == 2 else decks_to_return * 7
+    num_decks = 7 if pruning == 2 else 80
 
     # Get all decks from the database
     c = conn.cursor()
@@ -266,7 +270,7 @@ def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: 
             cur_card_set = set(deck_obj[1])
             can_add = True
             for used_card_set in used_cards_sets:
-                if len(cur_card_set.intersection(used_card_set)) > 24:
+                if len(cur_card_set.intersection(used_card_set)) > 23:
                     can_add = False
                     break
             if can_add:
