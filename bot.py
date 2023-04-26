@@ -1,11 +1,14 @@
 # Import Statements
+from alive_progress import alive_bar
 from datetime import datetime, timezone
 import discord
 from discord import option
-from discord.ext import pages
+from discord.ext import pages, tasks
 from dotenv import load_dotenv
 from functools import cmp_to_key
 from heapq import nlargest
+import lxml.html
+import lxml.cssselect
 import math
 import os
 import requests
@@ -27,6 +30,43 @@ conn = None
 db_file_name = "database.db"
 
 
+# Loads a single RoyaleAPI webpage into the database by scraping
+def load_deck(url: str):
+    sql = """
+        INSERT OR REPLACE INTO decks(id, card_1, card_2, card_3, card_4, card_5, card_6,
+            card_7, card_8, rating, usage, win_rate, entry_date)
+        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    try:
+        c = conn.cursor()
+        session = requests.Session()
+        response = session.get(url, headers={"user-agent": "Mozilla/5.0"})
+        html = lxml.html.fromstring(response.text)
+
+        for element in html.cssselect(".ui.two.column.stackable.padded.grid"):
+            links = list(element.iterlinks())
+            deck_id = links[0][2][13:]
+            cards = deck_id.split(",")
+            stats = element.xpath("div/div/div/div/table/tbody/tr/*/text()")
+            rating = int(stats[0].strip())
+            usage = int(stats[5].strip().replace(',', ''))
+            win_rate = float(stats[2].strip()[:-1])
+            try:
+                c.execute(sql, (deck_id, cards[0], cards[1], cards[2], cards[3], cards[4], cards[5], cards[6],
+                                cards[7], rating, usage, win_rate, datetime.now(timezone.utc)))
+            except Exception as e:
+                print(e)
+                pass
+
+        conn.commit()
+    except Exception as e:
+        print(e)
+        print("Could not load decks...\n")
+        return
+
+
+# Computes the score for generated war decks
 def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], prev_decks: [], max_idx: int):
     for cur_idx in range(max_idx + 1, len(decks)):
         deck = decks[cur_idx]
@@ -56,18 +96,6 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
         for i in range(1, 9):
             new_used.append(deck[i])
         yield prev_score + score, new_used, new_decks, cur_idx
-
-
-# Printing a message when the bot has been loaded
-@bot.event
-async def on_ready():
-    print(f"{bot.user} is ready and online!")
-    try:
-        global conn
-        conn = sqlite3.connect(db_file_name)
-    except sqlite3.Error:
-        print("Could not connect to database, terminating program...")
-        quit()
 
 
 @bot.slash_command(name="load_levels", description="Load a player's levels into the database")
@@ -241,6 +269,31 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
         await message.delete()
         await ctx.send_followup("Error occurred, please try again later")
 
+
+# Get the latest meta decks every 24 hours
+@tasks.loop(hours=24)
+async def load_decks():
+    c = conn.cursor()
+    num_cards = len(c.execute("SELECT * FROM cards").fetchall())
+    print("Fetching latest meta decks:")
+    with alive_bar(num_cards) as bar:
+        for row in c.execute("SELECT * FROM cards"):
+            load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
+            bar()
+    print("Finished loading decks...\n")
+
+
+# Printing a message when the bot has been loaded
+@bot.event
+async def on_ready():
+    print(f"{bot.user} is ready and online!\n")
+    try:
+        global conn
+        conn = sqlite3.connect(db_file_name)
+        load_decks.start()
+    except Exception as e:
+        print(e)
+        quit()
 
 # Running the bot
 bot.run(DISCORD_BOT_TOKEN)  # run the bot with the token

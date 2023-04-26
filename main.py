@@ -155,14 +155,14 @@ def load_decks(conn: sqlite3.Connection):
     try:
         match option:
             case "1":
-                load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=30")
+                load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20")
                 print("Decks successfully loaded!\n")
                 load_decks(conn)
             case "2":
                 card = input("Enter the card you would like to include: ").lower().replace(" ", "-")
                 c = conn.cursor()
                 if c.execute("SELECT 1 FROM cards WHERE id='" + card + "'").fetchone():
-                    load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=30&inc=" + card)
+                    load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + card)
                     print("Decks successfully loaded!\n")
                     load_decks(conn)
                 else:
@@ -173,7 +173,7 @@ def load_decks(conn: sqlite3.Connection):
                 num_cards = len(c.execute("SELECT * FROM cards").fetchall())
                 with alive_bar(num_cards) as bar:
                     for row in c.execute("SELECT * FROM cards"):
-                        load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=30&inc=" + row[0])
+                        load_deck(conn, "https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
                         bar()
             case "4":
                 print("Returning to main screen...\n")
