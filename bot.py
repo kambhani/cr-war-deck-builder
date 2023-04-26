@@ -30,6 +30,14 @@ conn = None
 db_file_name = "database.db"
 
 
+# Create a table if it does not already exist
+def create_table(table_creation_sql: str):
+    if conn is not None:
+        c = conn.cursor()
+        c.execute(table_creation_sql)
+        conn.commit()
+
+
 # Loads a single RoyaleAPI webpage into the database by scraping
 def load_deck(url: str):
     sql = """
@@ -137,7 +145,8 @@ async def load_levels(ctx, tag: str):
         choices=["Yes", "No"])
 @option("variation", description="Whether to force variation in the decks, select 1 for yes and 2 for no",
         choices=["Yes", "No"])
-async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to_return: int, pruning: str, variation: str):
+async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to_return: int, pruning: str,
+                             variation: str):
     try:
         c = conn.cursor()
         if tag[0] != '#':
@@ -271,29 +280,127 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
 
 
 # Get the latest meta decks every 24 hours
+# Also deletes old decks
 @tasks.loop(hours=24)
-async def load_decks():
+async def update_decks():
+    print("Updating deck list...")
     c = conn.cursor()
     num_cards = len(c.execute("SELECT * FROM cards").fetchall())
-    print("Fetching latest meta decks:")
     with alive_bar(num_cards) as bar:
         for row in c.execute("SELECT * FROM cards"):
             load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
             bar()
-    print("Finished loading decks...\n")
+    c.execute("DELETE FROM decks WHERE entry_date < date('now', '-60 day')")  # Delete decks older than 60 days
+    conn.commit()
+    print("Finished updating decks...\n")
+
+
+# Get the latest card list every 24 hours
+# This ensures that any newly released card is in the database quickly
+@tasks.loop(hours=24)
+async def update_cards():
+    print("Updating card list...")
+    url = "https://royaleapi.github.io/cr-api-data/json/cards.json"
+    sql = """
+            INSERT INTO cards(id, name, elixir, type, rarity)
+            VALUES(?, ?, ?, ?, ?)
+        """
+
+    try:
+        c = conn.cursor()
+        card_json = requests.get(url).json()
+        for card in card_json:
+            try:
+                c.execute(sql, (card["key"], card["name"], card["elixir"], card["type"], card["rarity"]))
+            except Exception as e:
+                pass
+        conn.commit()
+    except Exception as e:
+        print(e)
+        print("Could not update card list...")
+
+
+@tasks.loop(hours=24)
+async def update_levels():
+    print("Updating levels...")
+    sql_create_levels_table = "CREATE TABLE IF NOT EXISTS levels (\n\tid text PRIMARY KEY,\n\t"
+    c = conn.cursor()
+    for row in c.execute("SELECT * FROM cards"):
+        sql_create_levels_table += row[0].replace("-", "_") + " integer,\n\t"
+    sql_create_levels_table = sql_create_levels_table[:-3]
+    sql_create_levels_table += "\n);"
+    create_table(sql_create_levels_table)
+    columns = [(row[1]) for row in c.execute("PRAGMA table_info(levels)").fetchall()]
+    for row in c.execute("SELECT * FROM cards"):
+        if row[0].replace("-", "_") not in columns:
+            c.execute("ALTER TABLE levels ADD COLUMN %s integer" % row[0].replace("-", "_"))
+    conn.commit()
+
+
+# We delete all user levels every thirty days to avoid storing inactive users
+@tasks.loop(hours=720)
+async def delete_levels():
+    print("Deleting all player levels...")
+    c = conn.cursor()
+    c.execute("DELETE FROM levels")
+    conn.commit()
 
 
 # Printing a message when the bot has been loaded
 @bot.event
 async def on_ready():
+    sql_create_cards_table = """
+            CREATE TABLE IF NOT EXISTS cards (
+                id text PRIMARY KEY,
+                name text NOT NULL,
+                elixir integer NOT NULL,
+                type text NOT NULL,
+                rarity text NOT NULL
+            );
+        """
+    sql_create_decks_table = """
+            CREATE TABLE IF NOT EXISTS decks (
+                id text PRIMARY KEY,
+                card_1 text NOT NULL,
+                card_2 text NOT NULL,
+                card_3 text NOT NULL,
+                card_4 text NOT NULL,
+                card_5 text NOT NULL,
+                card_6 text NOT NULL,
+                card_7 text NOT NULL,
+                card_8 text NOT NULL,
+                rating integer NOT NULL,
+                usage integer NOT NULL,
+                win_rate DECIMAL(4,1) NOT NULL,
+                entry_date DATE NOT NULL,
+                FOREIGN KEY (card_1) REFERENCES cards (id),
+                FOREIGN KEY (card_2) REFERENCES cards (id),
+                FOREIGN KEY (card_3) REFERENCES cards (id),
+                FOREIGN KEY (card_4) REFERENCES cards (id),
+                FOREIGN KEY (card_5) REFERENCES cards (id),
+                FOREIGN KEY (card_6) REFERENCES cards (id),
+                FOREIGN KEY (card_7) REFERENCES cards (id),
+                FOREIGN KEY (card_8) REFERENCES cards (id)
+            );
+        """
     print(f"{bot.user} is ready and online!\n")
     try:
+        # Initialize the database connection
         global conn
         conn = sqlite3.connect(db_file_name)
-        load_decks.start()
+
+        # Create the cards table if it doesn't already exist
+        create_table(sql_create_cards_table)
+
+        update_decks.start()
+        update_cards.start()
+        update_levels.start()
+        delete_levels.start()
+
     except Exception as e:
         print(e)
         quit()
+
 
 # Running the bot
 bot.run(DISCORD_BOT_TOKEN)  # run the bot with the token

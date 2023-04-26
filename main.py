@@ -23,11 +23,11 @@ def create_connection(db_file_name: str):
         quit()
 
 
-# Create the cards table if it does not already exist
-def create_table(conn: sqlite3.Connection, create_table: str):
+# Create a table if it does not already exist
+def create_table(conn: sqlite3.Connection, table_creation_sql: str):
     if conn is not None:
         c = conn.cursor()
-        c.execute(create_table)
+        c.execute(table_creation_sql)
         conn.commit()
 
 
