@@ -1,13 +1,14 @@
 # Package Imports
 
 from alive_progress import alive_bar, alive_it
-import config  # Contains cr_api_token, the private API token
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 from functools import cmp_to_key
 from heapq import nlargest
 import lxml.html
 import lxml.cssselect
 import math
+import os
 import requests
 import sqlite3
 
@@ -95,7 +96,7 @@ def load_levels(conn: sqlite3.Connection, cr_api_token: str, tag: str):
                 0] == 0:
                 print("Found unknown card %s. Please report to developer." % card_name)
             c.execute("UPDATE levels SET %s=? WHERE id=?" % card_name, (14 - card["maxLevel"] + card["level"], tag))
-        print("Levels for player " + player_info["name"] + " successfully loaded")
+        print("Levels for player " + player_info["name"] + " successfully loaded\n")
         conn.commit()
 
 
@@ -360,8 +361,9 @@ def generate_war_decks(conn: sqlite3.Connection, tag: str):
 # The driver code for the program
 def main():
     # Necessary variables
+    load_dotenv()
     db_file_name = "database.db"
-    cr_api_token = config.cr_api_token
+    cr_api_token = os.getenv("CR_API_TOKEN")
     sql_create_cards_table = """
         CREATE TABLE IF NOT EXISTS cards (
             id text PRIMARY KEY,
@@ -396,8 +398,6 @@ def main():
             FOREIGN KEY (card_8) REFERENCES cards (id)
         );
     """
-
-    levels = None
 
     # Create the connection
     conn = create_connection(db_file_name)
