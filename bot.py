@@ -122,7 +122,7 @@ async def load_levels(ctx, tag: str):
     tag = "#" + tag
 
     if "reason" in player_info:
-        await ctx.respond("Invalid player tag!")
+        await ctx.respond("Invalid player tag!", ephemeral=True)
         return
     else:
         c = conn.cursor()
@@ -155,7 +155,7 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
         levels = c.execute("SELECT * FROM levels WHERE id='" + tag + "'").fetchone()
 
         if not levels:
-            await ctx.respond("Player tag not loaded, war deck generation failed.")
+            await ctx.respond("Player tag not loaded, war deck generation failed.", ephemeral=True)
             return
 
         await ctx.defer()  # Our code takes longer to run, so defer the final message
@@ -283,7 +283,7 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
 # Also deletes old decks
 @tasks.loop(hours=24)
 async def update_decks():
-    print("Updating deck list...")
+    print("Updating deck list...\t\t\t\t", datetime.now())
     c = conn.cursor()
     num_cards = len(c.execute("SELECT * FROM cards").fetchall())
     with alive_bar(num_cards) as bar:
@@ -292,14 +292,14 @@ async def update_decks():
             bar()
     c.execute("DELETE FROM decks WHERE entry_date < date('now', '-60 day')")  # Delete decks older than 60 days
     conn.commit()
-    print("Finished updating decks...\n")
+    print("Decks updated...\t\t\t\t", datetime.now())
 
 
 # Get the latest card list every 24 hours
 # This ensures that any newly released card is in the database quickly
 @tasks.loop(hours=24)
 async def update_cards():
-    print("Updating card list...")
+    print("Updating card list...\t\t\t\t", datetime.now())
     url = "https://royaleapi.github.io/cr-api-data/json/cards.json"
     sql = """
             INSERT INTO cards(id, name, elixir, type, rarity)
@@ -322,7 +322,7 @@ async def update_cards():
 
 @tasks.loop(hours=24)
 async def update_levels():
-    print("Updating levels...")
+    print("Updating levels...\t\t\t\t", datetime.now())
     sql_create_levels_table = "CREATE TABLE IF NOT EXISTS levels (\n\tid text PRIMARY KEY,\n\t"
     c = conn.cursor()
     for row in c.execute("SELECT * FROM cards"):
@@ -340,7 +340,7 @@ async def update_levels():
 # We delete all user levels every thirty days to avoid storing inactive users
 @tasks.loop(hours=720)
 async def delete_levels():
-    print("Deleting all player levels...")
+    print("Deleting levels...\t\t\t\t", datetime.now())
     c = conn.cursor()
     c.execute("DELETE FROM levels")
     conn.commit()
@@ -392,10 +392,18 @@ async def on_ready():
         # Create the cards table if it doesn't already exist
         create_table(sql_create_cards_table)
 
-        update_decks.start()
-        update_cards.start()
-        update_levels.start()
-        delete_levels.start()
+        # Create the decks table if it doesn't already exist
+        create_table(sql_create_decks_table)
+
+        # Start tasks if they aren't in progress
+        if not update_decks.is_running():
+            update_decks.start()
+        if not update_cards.is_running():
+            update_cards.start()
+        if not update_levels.is_running():
+            update_levels.start()
+        if not delete_levels.is_running():
+            delete_levels.start()
 
     except Exception as e:
         print(e)
