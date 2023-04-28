@@ -206,7 +206,7 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
             else:
                 levels_off_max += 14 - level[0]
         if not can_add:
-            score = -100000
+            score = -1000000000
         if score > 0:
             score *= pow(math.e, -0.2 * levels_off_max)
 
@@ -220,7 +220,7 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
 
 # This function actually performs the generation
 def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: int, variation: int):
-    num_decks = 7 if pruning == 2 else 80
+    num_decks = 6 if pruning == 2 else 70
 
     # Get all decks from the database
     c = conn.cursor()

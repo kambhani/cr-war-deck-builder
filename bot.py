@@ -94,7 +94,7 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
             else:
                 levels_off_max += 14 - level[0]
         if not can_add:
-            score = -100000
+            score = -1000000000
         if score > 0:
             score *= pow(math.e, -0.2 * levels_off_max)
 
@@ -159,10 +159,10 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
             return
 
         await ctx.defer()  # Our code takes longer to run, so defer the final message
-        pruning = 7 if pruning == "Yes" else 80
+        pruning = 1 if pruning == "Yes" else 2
         variation = 1 if variation == "Yes" else 2
 
-        num_decks = 2 if pruning == 2 else 5
+        num_decks = 6 if pruning == 2 else 70
 
         # Get all decks from the database
         c = conn.cursor()
@@ -286,10 +286,10 @@ async def update_decks():
     print("Updating deck list...\t\t\t\t", datetime.now())
     c = conn.cursor()
     num_cards = len(c.execute("SELECT * FROM cards").fetchall())
-    with alive_bar(num_cards) as bar:
+    '''with alive_bar(num_cards) as bar:
         for row in c.execute("SELECT * FROM cards"):
             load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
-            bar()
+            bar()'''
     c.execute("DELETE FROM decks WHERE entry_date < date('now', '-60 day')")  # Delete decks older than 60 days
     conn.commit()
     print("Decks updated...\t\t\t\t", datetime.now())
