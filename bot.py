@@ -286,10 +286,10 @@ async def update_decks():
     print("Updating deck list...\t\t\t\t", datetime.now())
     c = conn.cursor()
     num_cards = len(c.execute("SELECT * FROM cards").fetchall())
-    '''with alive_bar(num_cards) as bar:
+    with alive_bar(num_cards) as bar:
         for row in c.execute("SELECT * FROM cards"):
             load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
-            bar()'''
+            bar()
     c.execute("DELETE FROM decks WHERE entry_date < date('now', '-60 day')")  # Delete decks older than 60 days
     conn.commit()
     print("Decks updated...\t\t\t\t", datetime.now())
