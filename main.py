@@ -188,7 +188,7 @@ def load_decks(conn: sqlite3.Connection):
 
 # This function computes the score of a deck, or how good it is
 # Modifying how the score is computing will affect which decks get returned
-def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], prev_decks: [], max_idx: int):
+def deck_score(decks, levels: dict, prev_score: int, used: [], prev_decks: [], max_idx: int):
     for cur_idx in range(max_idx + 1, len(decks)):
         deck = decks[cur_idx]
         score = deck[10] * deck[11]  # Initial score
@@ -200,18 +200,20 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
             if deck[i] in used_set:
                 # If we already used a card, we can't use this deck
                 can_add = False
-            level = c.execute("SELECT " + deck[i].replace('-', '_') + " FROM levels WHERE id='" + tag + "'").fetchone()
-            if level[0] is None:
+                break
+
+            # Get the card level, if it exists
+            level = levels.get(deck[i])
+
+            if level is None:
                 # If the player doesn't have this card, we also can't use this deck
                 can_add = False
             else:
-                levels_off_max += 14 - level[0]
+                levels_off_max += 14 - level
         if not can_add:
             score = -1000000000
         if score > 0:
             score *= pow(math.e, -0.2 * levels_off_max)
-            #score *= (112 - levels_off_max) / 112
-            #score = 10000 * pow(math.e, -0.2 * levels_off_max) + deck[11]
 
         new_decks = list(prev_decks)
         new_decks.append(deck[0])
@@ -235,21 +237,28 @@ def get_deck_card_levels(conn: sqlite3.Connection, tag: str, deck: str):
 
 # This function actually performs the generation
 def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: int, variation: int):
-    num_decks = 7 if pruning == 2 else 80
+    num_decks = 10 if pruning == 2 else 100
 
     # Get all decks from the database
     c = conn.cursor()
     decks = c.execute("SELECT * FROM decks").fetchall()
 
+    # Get the levels from the database and convert them to a dictionary
+    levels_obj = c.execute("SELECT * FROM levels WHERE id='" + tag + "'").fetchone()
+    levels_columns = [(row[1]) for row in c.execute("PRAGMA table_info(levels)").fetchall()]
+    levels = {}
+    for i in range(1, len(levels_obj)):
+        levels[levels_columns[i].replace("_", "-")] = levels_obj[i]
+
     # Get the most optimal first decks
     print("Getting optimal first decks...")
-    deck_1 = nlargest(num_decks, deck_score(c, decks, tag, 0, [], [], -1))
+    deck_1 = nlargest(num_decks, deck_score(decks, levels, 0, [], [], -1))
 
     # Get the most optimal second decks
     print("Getting optimal second decks...")
     deck_2 = []
     for deck in alive_it(deck_1):
-        cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+        cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3]))
         for cur_deck in cur_decks:
             if float(cur_deck[0]) > 0:
                 deck_2.append(cur_deck)
@@ -260,7 +269,7 @@ def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: 
     print("Getting optimal third decks...")
     deck_3 = []
     for deck in alive_it(deck_2):
-        cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+        cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3]))
         for cur_deck in cur_decks:
             if float(cur_deck[0] > 0):
                 deck_3.append(cur_deck)
@@ -271,7 +280,7 @@ def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: 
     print("Getting optimal fourth decks...")
     deck_4 = []
     for deck in alive_it(deck_3):
-        cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+        cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3]))
         for cur_deck in cur_decks:
             if float(cur_deck[0] > 0):
                 deck_4.append(cur_deck)

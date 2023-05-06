@@ -74,8 +74,25 @@ def load_deck(url: str):
         return
 
 
+def load_levels(tag: str):
+    if len(tag) == 0:
+        return None
+
+    if tag[0] == "#":
+        tag = tag[1:]
+    tag = tag.upper()
+
+    url = "https://proxy.royaleapi.dev/v1/players/%23" + tag
+    player_info = requests.get(url, headers={"Authorization": "Bearer " + CR_API_TOKEN}).json()
+
+    if "reason" in player_info:
+        return None
+
+    return player_info["cards"]
+
+
 # Computes the score for generated war decks
-def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], prev_decks: [], max_idx: int):
+def deck_score(decks, levels: dict, prev_score: int, used: [], prev_decks: [], max_idx: int):
     for cur_idx in range(max_idx + 1, len(decks)):
         deck = decks[cur_idx]
         score = deck[10] * deck[11]  # Initial score
@@ -83,16 +100,22 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
         used_set = set(used)  # The set version of the currently used cards
         can_add = True  # Initial value of can_add
         levels_off_max = 0  # Number of levels off of having the war deck maxed
+
         for i in range(1, 9):
             if deck[i] in used_set:
                 # If we already used a card, we can't use this deck
                 can_add = False
-            level = c.execute("SELECT " + deck[i].replace('-', '_') + " FROM levels WHERE id='" + tag + "'").fetchone()
-            if level[0] is None:
+                break
+
+            # Get the card level, if it exists
+            level = levels.get(deck[i])
+
+            if level is None:
                 # If the player doesn't have this card, we also can't use this deck
                 can_add = False
             else:
-                levels_off_max += 14 - level[0]
+                levels_off_max += 14 - level
+
         if not can_add:
             score = -1000000000
         if score > 0:
@@ -106,37 +129,6 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
         yield prev_score + score, new_used, new_decks, cur_idx
 
 
-@bot.slash_command(name="load_levels", description="Load a player's levels into the database")
-@option("tag", description="Your player tag")
-async def load_levels(ctx, tag: str):
-    if len(tag) == 0:
-        await ctx.respond("Invalid player tag!")
-        return
-
-    if tag[0] == "#":
-        tag = tag[1:]
-    tag = tag.upper()
-
-    url = "https://proxy.royaleapi.dev/v1/players/%23" + tag
-    player_info = requests.get(url, headers={"Authorization": "Bearer " + CR_API_TOKEN}).json()
-    tag = "#" + tag
-
-    if "reason" in player_info:
-        await ctx.respond("Invalid player tag!", ephemeral=True)
-        return
-    else:
-        c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO levels(id) VALUES(?)", (tag,))
-        for card in player_info["cards"]:
-            card_name = card["name"].lower().replace(" ", "_").replace(".", "").replace("-", "_")
-            if c.execute("SELECT EXISTS(SELECT 1 FROM cards WHERE id='%s')" % card_name.replace("_", "-")).fetchone()[
-                0] == 0:
-                print("Found unknown card %s. Please report to developer." % card_name)
-            c.execute("UPDATE levels SET %s=? WHERE id=?" % card_name, (14 - card["maxLevel"] + card["level"], tag))
-        conn.commit()
-        await ctx.respond(f"Levels for player " + player_info["name"] + " successfully loaded")
-
-
 @bot.slash_command(name="generate_war_decks", description="Generate optimal war decks for a player")
 @option("tag", description="Your player tag")
 @option("decks_to_return", description="The number of decks to return (between 1 and 10)",
@@ -148,21 +140,29 @@ async def load_levels(ctx, tag: str):
 async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to_return: int, pruning: str,
                              variation: str):
     try:
-        c = conn.cursor()
+        # Adjust the inputted tag so it fits the API's required form
         if tag[0] != '#':
             tag = '#' + tag
         tag = tag.upper()
-        levels = c.execute("SELECT * FROM levels WHERE id='" + tag + "'").fetchone()
 
-        if not levels:
-            await ctx.respond("Player tag not loaded, war deck generation failed.", ephemeral=True)
+        # Load the player tag and return an error if something goes wrong
+        player_info = load_levels(tag)
+        if player_info is None:
+            await ctx.respond("Error loading player levels...", ephemeral=True)
             return
 
-        await ctx.defer()  # Our code takes longer to run, so defer the final message
+        # Convert the object array into a dictionary for faster processing
+        levels = {}
+        for card in player_info:
+            levels[card["name"].lower().replace(" ", "-").replace(".", "")] = 14 - card["maxLevel"] + card["level"]
+
+        # Indicate that this code will take longer to run
+        await ctx.defer()
+
+        # Adjust algorithm variables based on user input
         pruning = 1 if pruning == "Yes" else 2
         variation = 1 if variation == "Yes" else 2
-
-        num_decks = 6 if pruning == 2 else 70
+        num_decks = 7 if pruning == 2 else 80
 
         # Get all decks from the database
         c = conn.cursor()
@@ -170,13 +170,13 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
 
         # Get the most optimal first decks
         message = await ctx.send("Computing optimal first decks...")
-        deck_1 = nlargest(num_decks, deck_score(c, decks, tag, 0, [], [], -1))
+        deck_1 = nlargest(num_decks, deck_score(decks, levels, 0, [], [], -1))
 
         # Get the most optimal second decks
         await message.edit("Computing optimal second decks...")
         deck_2 = []
         for deck in deck_1:
-            cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+            cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3]))
             for cur_deck in cur_decks:
                 if float(cur_deck[0]) > 0:
                     deck_2.append(cur_deck)
@@ -187,7 +187,7 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
         await message.edit("Computing optimal third decks...")
         deck_3 = []
         for deck in deck_2:
-            cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+            cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3]))
             for cur_deck in cur_decks:
                 if float(cur_deck[0] > 0):
                     deck_3.append(cur_deck)
@@ -198,7 +198,7 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
         await message.edit("Computing optimal fourth decks...")
         deck_4 = []
         for deck in deck_3:
-            cur_decks = nlargest(num_decks, deck_score(c, decks, tag, deck[0], deck[1], deck[2], deck[3]))
+            cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3]))
             for cur_deck in cur_decks:
                 if float(cur_deck[0] > 0):
                     deck_4.append(cur_deck)
@@ -320,32 +320,6 @@ async def update_cards():
         print("Could not update card list...")
 
 
-@tasks.loop(hours=24)
-async def update_levels():
-    print("Updating levels...\t\t\t\t", datetime.now())
-    sql_create_levels_table = "CREATE TABLE IF NOT EXISTS levels (\n\tid text PRIMARY KEY,\n\t"
-    c = conn.cursor()
-    for row in c.execute("SELECT * FROM cards"):
-        sql_create_levels_table += row[0].replace("-", "_") + " integer,\n\t"
-    sql_create_levels_table = sql_create_levels_table[:-3]
-    sql_create_levels_table += "\n);"
-    create_table(sql_create_levels_table)
-    columns = [(row[1]) for row in c.execute("PRAGMA table_info(levels)").fetchall()]
-    for row in c.execute("SELECT * FROM cards"):
-        if row[0].replace("-", "_") not in columns:
-            c.execute("ALTER TABLE levels ADD COLUMN %s integer" % row[0].replace("-", "_"))
-    conn.commit()
-
-
-# We delete all user levels every thirty days to avoid storing inactive users
-@tasks.loop(hours=720)
-async def delete_levels():
-    print("Deleting levels...\t\t\t\t", datetime.now())
-    c = conn.cursor()
-    c.execute("DELETE FROM levels")
-    conn.commit()
-
-
 # Printing a message when the bot has been loaded
 @bot.event
 async def on_ready():
@@ -396,14 +370,10 @@ async def on_ready():
         create_table(sql_create_decks_table)
 
         # Start tasks if they aren't in progress
-        if not update_decks.is_running():
-            update_decks.start()
+        #if not update_decks.is_running():
+            #update_decks.start()
         if not update_cards.is_running():
             update_cards.start()
-        if not update_levels.is_running():
-            update_levels.start()
-        if not delete_levels.is_running():
-            delete_levels.start()
 
     except Exception as e:
         print(e)
