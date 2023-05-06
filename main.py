@@ -10,6 +10,7 @@ import lxml.cssselect
 import math
 import os
 import requests
+import statistics
 import sqlite3
 
 
@@ -200,7 +201,7 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
                 # If we already used a card, we can't use this deck
                 can_add = False
             level = c.execute("SELECT " + deck[i].replace('-', '_') + " FROM levels WHERE id='" + tag + "'").fetchone()
-            if level is None:
+            if level[0] is None:
                 # If the player doesn't have this card, we also can't use this deck
                 can_add = False
             else:
@@ -209,6 +210,8 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
             score = -1000000000
         if score > 0:
             score *= pow(math.e, -0.2 * levels_off_max)
+            #score *= (112 - levels_off_max) / 112
+            #score = 10000 * pow(math.e, -0.2 * levels_off_max) + deck[11]
 
         new_decks = list(prev_decks)
         new_decks.append(deck[0])
@@ -218,9 +221,21 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
         yield prev_score + score, new_used, new_decks, cur_idx
 
 
+# This function gets the card levels of a deck, given the deck and the player tag
+def get_deck_card_levels(conn: sqlite3.Connection, tag: str, deck: str):
+    c = conn.cursor()
+    ret = []
+    cards = deck.split(",")
+    for card in cards:
+        res = c.execute("SELECT " + card.replace('-', '_') + " FROM levels WHERE id='" + tag + "'").fetchone()
+        level = -1000 if res is None else res[0]
+        ret.append(level)
+    return ret
+
+
 # This function actually performs the generation
 def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: int, variation: int):
-    num_decks = 6 if pruning == 2 else 70
+    num_decks = 7 if pruning == 2 else 80
 
     # Get all decks from the database
     c = conn.cursor()
@@ -277,7 +292,8 @@ def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: 
             if can_add:
                 print("Deck %d with a score of %s" % (printed + 1, deck_obj[0]))
                 for deck in deck_obj[2]:
-                    print("https://royaleapi.com/decks/stats/" + deck)
+                    print("https://royaleapi.com/decks/stats/%s [AVG LEVEL: %.3f]" %
+                          (deck, statistics.mean(get_deck_card_levels(conn, tag, deck))))
                 print("--------------------------------------")
                 printed += 1
                 used_cards_sets.append(cur_card_set)
@@ -292,7 +308,8 @@ def generate(conn: sqlite3.Connection, tag: str, decks_to_return: int, pruning: 
             if float(decks[0]) > 0:
                 print("Deck %d with a score of %s" % (idx + 1, decks[0]))
                 for deck in decks[2]:
-                    print("https://royaleapi.com/decks/stats/" + deck)
+                    print("https://royaleapi.com/decks/stats/%s [AVG LEVEL: %.3f]" %
+                          (deck, statistics.mean(get_deck_card_levels(conn, tag, deck))))
                 print("--------------------------------------")
         print()
 

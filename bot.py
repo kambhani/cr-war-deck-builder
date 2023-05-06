@@ -88,7 +88,7 @@ def deck_score(c: sqlite3.Cursor, decks, tag: str, prev_score: int, used: [], pr
                 # If we already used a card, we can't use this deck
                 can_add = False
             level = c.execute("SELECT " + deck[i].replace('-', '_') + " FROM levels WHERE id='" + tag + "'").fetchone()
-            if level is None:
+            if level[0] is None:
                 # If the player doesn't have this card, we also can't use this deck
                 can_add = False
             else:
