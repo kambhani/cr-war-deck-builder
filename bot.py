@@ -279,6 +279,73 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
         await ctx.send_followup("Error occurred, please try again later")
 
 
+@bot.slash_command(name="load_deck_info", description="Load info for a particular deck")
+@option("link", description="The RoyaleAPI link to the deck")
+@option("name", description="The name of the deck")
+@option("description", description="A brief description of the deck")
+async def load_deck_info(ctx: discord.ApplicationContext, link: str, name: str, description: str):
+    try:
+        # Get the deck info from RoyaleAPI
+        session = requests.Session()
+        response = session.get(link, headers={"user-agent": "Mozilla/5.0"})
+        html = lxml.html.fromstring(response.text)
+
+        # Create the initial embed
+        embed = discord.Embed(
+            title=f"__{name}__",
+            description=description,
+            color=discord.Colour.dark_magenta(),
+            url=link
+        )
+        embed.add_field(name="", value="", inline=False)  # Padding
+
+        # Add battle outcome info
+        embed.add_field(name="Battle Outcomes", value="", inline=False)
+        outcomes = html.cssselect(".ui.very.basic.compact.stats.unstackable.table")[0].xpath("tbody/tr/*/text()")
+        embed.add_field(name="", value=f"__{outcomes[0]}__\n{outcomes[1]} | {outcomes[2]}", inline=True)
+        embed.add_field(name="", value="", inline=True)  # Padding
+        embed.add_field(name="", value=f"__{outcomes[3]}__\n{outcomes[4]} | {outcomes[5]}", inline=True)
+        embed.add_field(name="", value=f"__{outcomes[6]}__\n{outcomes[7]} | {outcomes[8]}", inline=True)
+        embed.add_field(name="", value="", inline=True)  # Padding
+        embed.add_field(name="", value=f"__{outcomes[9]}__\n{outcomes[10]} | {outcomes[11]}", inline=True)
+        embed.add_field(name="", value="", inline=False)  # Padding
+
+        # Add CC and GC win info
+        embed.add_field(name="CC and GC Wins", value="", inline=False)
+        win_timeframe = ["7d", "28d"]
+        for idx, row in enumerate(html.cssselect(".item.cc")):
+            arr = row.xpath("div/*/text()")
+            embed.add_field(name="",
+                            value=f"__CC Wins | {win_timeframe[idx]}__\n{arr[2].strip()}", inline=True)
+            if idx == 0:
+                embed.add_field(name="", value="", inline=True)  # Padding
+        for idx, row in enumerate(html.cssselect(".item.gc")):
+            arr = row.xpath("div/*/text()")
+            embed.add_field(name="",
+                            value=f"__GC Wins | {win_timeframe[idx]}__\n{arr[2].strip()}", inline=True)
+            if idx == 0:
+                embed.add_field(name="", value="", inline=True)  # Padding
+        embed.add_field(name="", value="", inline=False)  # Padding
+
+        # Add the in-game link
+        game_link = html.cssselect(".ui.blue.icon.circular.button.button_popup")[0].get("href")
+        embed.add_field(name="", value=f"__**[Copy deck in-game]({game_link})**__", inline=False)  # Padding
+
+        # Add the deck image
+        embed.set_image(
+            url=f"https://media.royaleapi.com/deck/{datetime.today().strftime('%Y-%m-%d')}/{link.split('/')[-1]}.jpg")
+
+        # Add the author and footer
+        embed.set_author(name="Clash Utilities")
+        embed.set_footer(text="Generated with ❤️ by TheBest")
+
+        # Send the embed
+        await ctx.respond(embed=embed)
+    except Exception as e:
+        print(e)
+        await ctx.respond("Could not load deck info...", ephemeral=True)
+
+
 # Get the latest meta decks every 24 hours
 # Also deletes old decks
 @tasks.loop(hours=24)
@@ -370,8 +437,8 @@ async def on_ready():
         create_table(sql_create_decks_table)
 
         # Start tasks if they aren't in progress
-        #if not update_decks.is_running():
-            #update_decks.start()
+        # if not update_decks.is_running():
+        # update_decks.start()
         if not update_cards.is_running():
             update_cards.start()
 
