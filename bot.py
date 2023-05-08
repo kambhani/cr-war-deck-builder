@@ -283,7 +283,10 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
 @option("link", description="The RoyaleAPI link to the deck")
 @option("name", description="The name of the deck")
 @option("description", description="A brief description of the deck")
-async def load_deck_info(ctx: discord.ApplicationContext, link: str, name: str, description: str):
+@option("show_battle_outcomes", description="Whether to show battle outcome data", choices=["Yes", "No"])
+@option("show_challenge_wins", description="Whether to show challenge win info", choices=["Yes", "No"])
+async def load_deck_info(ctx: discord.ApplicationContext, link: str, name: str, description: str,
+                         show_battle_outcomes: str, show_challenge_wins: str):
     try:
         # Get the deck info from RoyaleAPI
         session = requests.Session()
@@ -299,33 +302,35 @@ async def load_deck_info(ctx: discord.ApplicationContext, link: str, name: str, 
         )
         embed.add_field(name="", value="", inline=False)  # Padding
 
-        # Add battle outcome info
-        embed.add_field(name="Battle Outcomes", value="", inline=False)
-        outcomes = html.cssselect(".ui.very.basic.compact.stats.unstackable.table")[0].xpath("tbody/tr/*/text()")
-        embed.add_field(name="", value=f"__{outcomes[0]}__\n{outcomes[1]} | {outcomes[2]}", inline=True)
-        embed.add_field(name="", value="", inline=True)  # Padding
-        embed.add_field(name="", value=f"__{outcomes[3]}__\n{outcomes[4]} | {outcomes[5]}", inline=True)
-        embed.add_field(name="", value=f"__{outcomes[6]}__\n{outcomes[7]} | {outcomes[8]}", inline=True)
-        embed.add_field(name="", value="", inline=True)  # Padding
-        embed.add_field(name="", value=f"__{outcomes[9]}__\n{outcomes[10]} | {outcomes[11]}", inline=True)
-        embed.add_field(name="", value="", inline=False)  # Padding
+        if show_battle_outcomes == "Yes":
+            # Add battle outcome info
+            embed.add_field(name="Battle Outcomes", value="", inline=False)
+            outcomes = html.cssselect(".ui.very.basic.compact.stats.unstackable.table")[0].xpath("tbody/tr/*/text()")
+            embed.add_field(name="", value=f"__{outcomes[0]}__\n{outcomes[1]} | {outcomes[2]}", inline=True)
+            embed.add_field(name="", value="", inline=True)  # Padding
+            embed.add_field(name="", value=f"__{outcomes[3]}__\n{outcomes[4]} | {outcomes[5]}", inline=True)
+            embed.add_field(name="", value=f"__{outcomes[6]}__\n{outcomes[7]} | {outcomes[8]}", inline=True)
+            embed.add_field(name="", value="", inline=True)  # Padding
+            embed.add_field(name="", value=f"__{outcomes[9]}__\n{outcomes[10]} | {outcomes[11]}", inline=True)
+            embed.add_field(name="", value="", inline=False)  # Padding
 
-        # Add CC and GC win info
-        embed.add_field(name="CC and GC Wins", value="", inline=False)
-        win_timeframe = ["7d", "28d"]
-        for idx, row in enumerate(html.cssselect(".item.cc")):
-            arr = row.xpath("div/*/text()")
-            embed.add_field(name="",
-                            value=f"__CC Wins | {win_timeframe[idx]}__\n{arr[2].strip()}", inline=True)
-            if idx == 0:
-                embed.add_field(name="", value="", inline=True)  # Padding
-        for idx, row in enumerate(html.cssselect(".item.gc")):
-            arr = row.xpath("div/*/text()")
-            embed.add_field(name="",
-                            value=f"__GC Wins | {win_timeframe[idx]}__\n{arr[2].strip()}", inline=True)
-            if idx == 0:
-                embed.add_field(name="", value="", inline=True)  # Padding
-        embed.add_field(name="", value="", inline=False)  # Padding
+        if show_challenge_wins == "Yes":
+            # Add CC and GC win info
+            embed.add_field(name="CC and GC Wins", value="", inline=False)
+            win_timeframe = ["7d", "28d"]
+            for idx, row in enumerate(html.cssselect(".item.cc")):
+                arr = row.xpath("div/*/text()")
+                embed.add_field(name="",
+                                value=f"__CC Wins | {win_timeframe[idx]}__\n{arr[2].strip()}", inline=True)
+                if idx == 0:
+                    embed.add_field(name="", value="", inline=True)  # Padding
+            for idx, row in enumerate(html.cssselect(".item.gc")):
+                arr = row.xpath("div/*/text()")
+                embed.add_field(name="",
+                                value=f"__GC Wins | {win_timeframe[idx]}__\n{arr[2].strip()}", inline=True)
+                if idx == 0:
+                    embed.add_field(name="", value="", inline=True)  # Padding
+            embed.add_field(name="", value="", inline=False)  # Padding
 
         # Add the in-game link
         game_link = html.cssselect(".ui.blue.icon.circular.button.button_popup")[0].get("href")
