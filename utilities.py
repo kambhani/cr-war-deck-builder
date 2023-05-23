@@ -211,8 +211,6 @@ def validate_card_list(card_list: str) -> (bool, set):
 def deck_score(decks, levels: dict, prev_score: int, used: set, prev_decks: [], max_idx: int, exclude_set: set):
     for cur_idx in range(max_idx + 1, len(decks)):
         deck = decks[cur_idx]
-        score = deck[10] * deck[11]  # Initial score
-        score *= 1 - (datetime.now(timezone.utc) - datetime.strptime(deck[12], "%Y-%m-%d %H:%M:%S.%f%z")).days * 0.02
         can_add = True  # Initial value of can_add
         levels_off_max = 0  # Number of levels off of having the war deck maxed
 
@@ -233,8 +231,9 @@ def deck_score(decks, levels: dict, prev_score: int, used: set, prev_decks: [], 
                 levels_off_max += 14 - level
         if not can_add:
             score = -1000000000
-        if score > 0:
-            score *= pow(math.e, -0.2 * levels_off_max)
+        else:
+            score = 112 - levels_off_max + deck[10] / 8000 + deck[11] / 20
+            score *= 1 - (datetime.now(timezone.utc) - datetime.strptime(deck[12], "%Y-%m-%d %H:%M:%S.%f%z")).days * 0.1
 
         new_decks = list(prev_decks)
         new_decks.append(deck[0])
@@ -261,7 +260,7 @@ def get_deck_card_levels(deck: str, levels: dict) -> list:
 async def compute_war_decks(decks_to_return: int, pruning: int, variation: int, include_set: set, exclude_set: set,
                             decks_to_generate: int, decks: list, levels: dict, message: discord.Message | None):
     # Calculate the number of decks to generate in each iteration
-    num_decks = 7 if pruning == 2 else 150
+    num_decks = 10 if pruning == 2 else 200
 
     # Display the initial message
     if message is None:

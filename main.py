@@ -26,14 +26,14 @@ def load_decks(conn: sqlite3.Connection):
     try:
         match option:
             case "1":
-                utilities.load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20")
+                utilities.load_deck("https://royaleapi.com/decks/popular?type=TopRanked&time=7d&size=20")
                 print("Decks successfully loaded!\n")
                 load_decks(conn)
             case "2":
                 card = input("Enter the card you would like to include: ").lower().replace(" ", "-")
                 c = conn.cursor()
                 if c.execute("SELECT 1 FROM cards WHERE id='" + card + "'").fetchone():
-                    utilities.load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + card)
+                    utilities.load_deck("https://royaleapi.com/decks/popular?type=TopRanked&time=7d&size=20&inc=" + card)
                     print("Decks successfully loaded!\n")
                     load_decks(conn)
                 else:
@@ -44,7 +44,7 @@ def load_decks(conn: sqlite3.Connection):
                 num_cards = len(c.execute("SELECT * FROM cards").fetchall())
                 with alive_bar(num_cards) as bar:
                     for row in c.execute("SELECT * FROM cards"):
-                        utilities.load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
+                        utilities.load_deck("https://royaleapi.com/decks/popular?type=TopRanked&time=7d&size=20&inc=" + row[0])
                         bar()
             case "4":
                 print("Returning to main screen...\n")
