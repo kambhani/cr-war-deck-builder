@@ -26,14 +26,14 @@ def load_decks(conn: sqlite3.Connection):
     try:
         match option:
             case "1":
-                utilities.load_deck("https://royaleapi.com/decks/popular?type=TopRanked&time=7d&size=20")
+                utilities.load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20")
                 print("Decks successfully loaded!\n")
                 load_decks(conn)
             case "2":
                 card = input("Enter the card you would like to include: ").lower().replace(" ", "-")
                 c = conn.cursor()
                 if c.execute("SELECT 1 FROM cards WHERE id='" + card + "'").fetchone():
-                    utilities.load_deck("https://royaleapi.com/decks/popular?type=TopRanked&time=7d&size=20&inc=" + card)
+                    utilities.load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + card)
                     print("Decks successfully loaded!\n")
                     load_decks(conn)
                 else:
@@ -44,7 +44,7 @@ def load_decks(conn: sqlite3.Connection):
                 num_cards = len(c.execute("SELECT * FROM cards").fetchall())
                 with alive_bar(num_cards) as bar:
                     for row in c.execute("SELECT * FROM cards"):
-                        utilities.load_deck("https://royaleapi.com/decks/popular?type=TopRanked&time=7d&size=20&inc=" + row[0])
+                        utilities.load_deck("https://royaleapi.com/decks/popular?type=GC&time=7d&size=20&inc=" + row[0])
                         bar()
             case "4":
                 print("Returning to main screen...\n")
@@ -77,7 +77,9 @@ def generate(tag: str, decks_to_return: int, pruning: int, variation: int, inclu
     # Print out the best decks
     for idx, cur_decks in enumerate(best_decks):
         if float(cur_decks[0]) > 0:
-            print("Deck %d with a score of %s" % (idx + 1, cur_decks[0]))
+            print(f"Deck set {idx + 1} with a score of {cur_decks[0]} and level utilization rate "
+                  f"{round(utilities.level_utilization(cur_decks[2], levels), 1)}%")
+
             for deck in cur_decks[2]:
                 print("https://royaleapi.com/decks/stats/%s [AVG LEVEL: %.3f]" %
                       (deck, statistics.mean(utilities.get_deck_card_levels(deck, levels))))
@@ -102,50 +104,19 @@ def generate_war_decks(tag: str):
         print("Player tag not loaded, returning to main screen...\n")
         return
 
-    decks_to_return = -1
-    repeat = False
-    while not isinstance(decks_to_return, int) or decks_to_return < 1 or decks_to_return > 20:
-        if repeat:
-            print("Invalid entry, please enter again")
-        decks_to_return = input("Enter the number of decks to return (between 1 and 20 inclusive) or press q to quit: ")
-        if decks_to_return == "q":
-            print()
-            return
-        try:
-            decks_to_return = int(decks_to_return)
-        except ValueError as e:
-            pass
-        repeat = True
-    decks_to_return = int(decks_to_return)
-
-    repeat = False
-    pruning = -1
-    while pruning != "1" and pruning != "2" and pruning != "3":
-        if repeat:
-            print("Invalid entry, please enter again")
-        print("Do you want to use iterative pruning?")
-        print("(1) Yes")
-        print("(2) No")
-        print("(3) Quit")
-        pruning = input()
-        repeat = True
-    pruning = int(pruning)
-    if pruning == 3:
+    decks_to_return = utilities.get_integer(1, 20, "Enter the number of decks to return (between 1 and 20 inclusive) "
+                                                   "or press q to quit: ", "q")
+    if decks_to_return is None:
         return
 
-    repeat = False
-    variation = -1
-    while variation != "1" and variation != "2" and variation != "3":
-        if repeat:
-            print("Invalid entry, please enter again")
-        print("Do you want to force variation in the returned decks (at the expense of optimality)?")
-        print("(1) Yes")
-        print("(2) No")
-        print("(3) Quit")
-        variation = input()
-        repeat = True
-    variation = int(variation)
-    if variation == 3:
+    pruning = utilities.get_integer(1, 3, "Do you want to use iterative pruning?\n(1) Yes\n(2) No\n(3) Quit\n",
+                                    "3")
+    if pruning is None:
+        return
+
+    variation = utilities.get_integer(1, 3, "Do you want to force variation in the returned decks (at the expense of "
+                                            "optimality)?\n(1) Yes\n(2) No\n(3) Quit\n", "3")
+    if variation is None:
         return
 
     repeat = False
@@ -194,22 +165,10 @@ def generate_war_decks(tag: str):
             exclude_set = validation[1]
             break
 
-    decks_to_generate = -1
-    repeat = False
-    while not isinstance(decks_to_generate, int) or decks_to_generate < 1 or decks_to_generate > 4:
-        if repeat:
-            print("Invalid entry, please enter a valid number")
-        decks_to_generate = input("Enter the number of decks to generate (between 1 and 4 inclusive) or press q to "
-                                  "quit: ")
-        if decks_to_generate == "q":
-            print()
-            return
-        try:
-            decks_to_generate = int(decks_to_generate)
-        except ValueError as e:
-            pass
-        repeat = True
-    decks_to_generate = int(decks_to_generate)
+    decks_to_generate = utilities.get_integer(1, 4, "Enter the number of decks to generate (between 1 and 4 "
+                                                    "inclusive) or press q to quit: ", "q")
+    if decks_to_generate is None:
+        return
 
     generate(tag, decks_to_return, pruning, variation, include_set, exclude_set, decks_to_generate)
 

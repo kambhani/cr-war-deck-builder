@@ -96,11 +96,8 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
         message = await ctx.send("Starting computation...")
 
         # Get the best deck sets
-        # We block printing for this function as otherwise, the progress bars would appear in the bot log file
-        sys.stdout = open(os.devnull, "w", encoding="utf-8")
         best_decks = await utilities.compute_war_decks(decks_to_return, pruning, variation, include_set,
                                                        exclude_set, decks_to_generate, decks, levels, message)
-        sys.stdout = sys.__stdout__
 
         # Return the best decks
         ret = []
@@ -110,9 +107,10 @@ async def generate_war_decks(ctx: discord.ApplicationContext, tag: str, decks_to
             for i in range(0, len(deck[2])):
                 if i == 0:
                     embed = discord.Embed(
-                        title=f"War Deck Set %d" % idx,
-                        description="This war deck combination has a score of %s. Check the decks out below." % int(
-                            deck[0]),
+                        title=f"War Deck Set {idx}",
+                        description=f"This war deck combination has a score of {round(float(deck[0]), 2)} with a level "
+                                    f"utilization rate of {round(utilities.level_utilization(deck[2], levels), 1)}%. "
+                                    f"Check the decks out below.",
                         color=discord.Colour.dark_magenta(),
                         url="https://royaleapi.com/decks/duel-search"
                     )
@@ -265,10 +263,10 @@ async def on_ready():
         create_table(utilities.SQL_CREATE_DECKS_TABLE)
 
         # Start tasks if they aren't in progress
-        if not update_decks.is_running():
-            update_decks.start()
         if not update_cards.is_running():
             update_cards.start()
+        #if not update_decks.is_running():
+        #    update_decks.start()
 
     except Exception as e:
         print(e)

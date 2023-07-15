@@ -232,8 +232,9 @@ def deck_score(decks, levels: dict, prev_score: int, used: set, prev_decks: [], 
         if not can_add:
             score = -1000000000
         else:
-            score = 112 - levels_off_max + deck[10] / 8000 + deck[11] / 20
+            score = 112 - levels_off_max + deck[10] / 2000 + deck[11] / 20
             score *= 1 - (datetime.now(timezone.utc) - datetime.strptime(deck[12], "%Y-%m-%d %H:%M:%S.%f%z")).days * 0.1
+            score *= 2
 
         new_decks = list(prev_decks)
         new_decks.append(deck[0])
@@ -260,7 +261,7 @@ def get_deck_card_levels(deck: str, levels: dict) -> list:
 async def compute_war_decks(decks_to_return: int, pruning: int, variation: int, include_set: set, exclude_set: set,
                             decks_to_generate: int, decks: list, levels: dict, message: discord.Message | None):
     # Calculate the number of decks to generate in each iteration
-    num_decks = 10 if pruning == 2 else 200
+    num_decks = 7 if pruning == 2 else 150
 
     # Display the initial message
     if message is None:
@@ -282,12 +283,20 @@ async def compute_war_decks(decks_to_return: int, pruning: int, variation: int, 
             await message.edit(f"Getting optimal decks for deck slot {i}...")
 
         new_decks = []
-        for deck in alive_it(initial_decks):
-            cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3],
-                                                       exclude_set))
-            for cur_deck in cur_decks:
-                if float(cur_deck[0]) > 0:
-                    new_decks.append(cur_deck)
+        if message is None:
+            for deck in alive_it(initial_decks):
+                cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3],
+                                                           exclude_set))
+                for cur_deck in cur_decks:
+                    if float(cur_deck[0]) > 0:
+                        new_decks.append(cur_deck)
+        else:
+            for deck in initial_decks:
+                cur_decks = nlargest(num_decks, deck_score(decks, levels, deck[0], deck[1], deck[2], deck[3],
+                                                           exclude_set))
+                for cur_deck in cur_decks:
+                    if float(cur_deck[0]) > 0:
+                        new_decks.append(cur_deck)
         initial_decks = new_decks
         if pruning == 1 and i < decks_to_generate:
             initial_decks = nlargest(num_decks, initial_decks)
@@ -315,3 +324,38 @@ async def compute_war_decks(decks_to_return: int, pruning: int, variation: int, 
             break
 
     return best_decks
+
+
+# This returns the level utilization rate of a given deck set
+def level_utilization(decks: [], levels: dict) -> float:
+    set_levels = 0
+    for deck in decks:
+        set_levels += sum(get_deck_card_levels(deck, levels))
+
+    player_levels = []
+    for key in levels:
+        if levels[key] is not None:
+            player_levels.append(levels[key])
+    player_levels.sort(reverse=True)
+
+    return set_levels * 100.0 / sum(player_levels[0:8 * (len(decks))])
+
+
+# This function gets a validated integer from the command line
+def get_integer(lower_bound: int, upper_bound: int, text: str, escape: str) -> int | None:
+    ret = None
+    repeat = False
+    while not isinstance(ret, int) or ret < lower_bound or ret > upper_bound:
+        if repeat:
+            print("Invalid entry, please enter a valid number")
+        ret = input(text)
+        if ret == escape:
+            print()
+            return None
+        try:
+            ret = int(ret)
+        except ValueError as e:
+            pass
+        repeat = True
+    return int(ret)
+
